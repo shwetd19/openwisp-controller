@@ -256,7 +256,7 @@ class AbstractConfig(BaseConfig):
 
         if action == 'post_clear':
             if instance.is_deactivating_or_deactivated():
-                # If the device is deactivated or in the process of deactivatiing, then
+                # If the device is deactivated or in the process of deactivating, then
                 # delete all vpn clients and return.
                 instance.vpnclient_set.all().delete()
             return
@@ -274,14 +274,13 @@ class AbstractConfig(BaseConfig):
         # coming from admin ModelForm
         else:
             templates = pk_set
-        # delete VPN clients which have been cleared
-        # by sortedm2m and have not been added back
+
+        # Get list of VPNs currently in use by any template
+        current_vpns = instance.templates.filter(type='vpn').values_list('vpn', flat=True)
+
         if action == 'post_add':
-            vpn_list = instance.templates.filter(type='vpn').values_list('vpn')
-            instance.vpnclient_set.exclude(vpn__in=vpn_list).delete()
-        # when adding or removing specific templates
-        for template in templates.filter(type='vpn'):
-            if action == 'post_add':
+            # Create new VPN clients for added templates
+            for template in templates.filter(type='vpn'):
                 if vpn_client_model.objects.filter(
                     config=instance, vpn=template.vpn
                 ).exists():
@@ -293,9 +292,11 @@ class AbstractConfig(BaseConfig):
                 )
                 client.full_clean()
                 client.save()
-            elif action == 'post_remove':
-                for client in instance.vpnclient_set.filter(vpn=template.vpn):
-                    client.delete()
+            # Delete VPN clients only if their VPN is no longer used by any template
+            instance.vpnclient_set.exclude(vpn__in=current_vpns).delete()
+        elif action == 'post_remove':
+            # Clean up any VPN clients that are no longer needed
+            instance.vpnclient_set.exclude(vpn__in=current_vpns).delete()
 
     @classmethod
     def clean_templates_org(cls, action, instance, pk_set, raw_data=None, **kwargs):
